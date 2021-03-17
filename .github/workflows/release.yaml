@@ -23,12 +23,10 @@ jobs:
           export S_LND_RELEASE=$(curl -sL https://api.github.com/repos/${{ github.repository }}/releases/latest)
 
           export LND_RELEASE_TAG=$(jq -r ".tag_name" <<< "${LND_RELEASE}")
-          export LND_RELEASE_BODY=$(jq -r ".body" <<< "${LND_RELEASE}")
           export S_LND_RELEASE_TAG=$(jq -r ".tag_name" <<< "${S_LND_RELEASE}")
 
 
           echo "LND_LATEST=${LND_RELEASE_TAG}" >> $GITHUB_ENV
-          echo "LND_RELEASE_BODY=${LND_RELEASE_BODY}" >> $GITHUB_ENV
           echo "S_LND_LATEST=${S_LND_RELEASE_TAG}" >> $GITHUB_ENV
       
       - name: Checkout to the latest release Git tag
@@ -60,5 +58,13 @@ jobs:
           files: |
             /lnd-2*/*.tar.gz
             /lnd-2*/*.zip
-          body: ${{ env.LND_RELEASE_BODY }}
+          body: |
+            Experimental release of ${{ env.LND_RELEASE_TAG }} containing: 
+            - experimental
+            - autopilotrpc
+            - signrpc
+            - walletrpc
+            - chainrpc
+            - invoicesrpc 
+            - routerrpc
           draft: false

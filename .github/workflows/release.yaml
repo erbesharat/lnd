@@ -32,7 +32,7 @@ jobs:
       - name: Checkout to the latest release Git tag
         if: ${{ env.LND_LATEST != env.S_LND_LATEST }}
         run: |
-          git checkout ${{ env.LND_RELEASE_TAG }}
+          git checkout ${{ env.LND_LATEST }}
       
       - name: Push latest release tag to Shocknet fork
         if: ${{ env.LND_LATEST != env.S_LND_LATEST }}
@@ -40,7 +40,7 @@ jobs:
           git config user.name github-actions
           git config user.email github-actions@github.com
           git remote set-url origin https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}
-          git push -u origin ${{ env.LND_RELEASE_TAG }}
+          git push -u origin ${{ env.LND_LATEST }}
 
       - name: Build the latest version with experimental flag
         if: ${{ env.LND_LATEST != env.S_LND_LATEST }}
@@ -59,7 +59,7 @@ jobs:
             /lnd-2*/*.tar.gz
             /lnd-2*/*.zip
           body: |
-            Experimental release of ${{ env.LND_RELEASE_TAG }} containing: 
+            Experimental release of ${{ env.LND_LATEST }} containing: 
             - experimental
             - autopilotrpc
             - signrpc

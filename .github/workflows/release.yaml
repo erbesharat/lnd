@@ -56,8 +56,8 @@ jobs:
         if: steps.git-check.outputs.modified == 'true'
         with:
           files: |
-            /lnd-2*/*.tar.gz
-            /lnd-2*/*.zip
+            lnd-2*/*.tar.gz
+            lnd-2*/*.zip
           body: |
             Experimental release of ${{ env.LND_LATEST }} containing: 
             - experimental

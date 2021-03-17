@@ -69,3 +69,5 @@ jobs:
             - routerrpc
           draft: false
           tag_name: ${{ env.LND_LATEST }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

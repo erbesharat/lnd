@@ -1,162 +1,64 @@
-name: Release build
-
+name: Get latest release and create new experimental release
 on:
-  push:
-    tags:
-      - 'v*'
-
-defaults:
-  run:
-    shell: bash
-
-env:
-  # If you change this value, please change it in the following files as well:
-  # /.travis.yml
-  # /Dockerfile
-  # /dev.Dockerfile
-  # /make/builder.Dockerfile
-  # /.github/workflows/main.yml
-  GO_VERSION: 1.15.7
-
+  schedule:
+    - cron: "0 13 * * *"
+  workflow_dispatch:
+    inputs:
+      name:
+        description: "Manually run build"
+        required: false
 jobs:
-  main:
-    name: Release build
+  build-experimental:
     runs-on: ubuntu-latest
     steps:
-      - name: git checkout
-        uses: actions/checkout@v2
+      - uses: actions/checkout@master
         with:
-          fetch-depth: 0
+          repository: 'lightningnetwork/lnd'
+          persist-credentials: false
+          fetch-depth: 0 # otherwise, you will failed to push refs to dest repo
+      
+      - name: Fetch release version
+        run: |
+          export LND_RELEASE=$(curl -sL https://api.github.com/repos/lightningnetwork/lnd/releases/latest)
+          export S_LND_RELEASE=$(curl -sL https://api.github.com/repos/${{ github.repository }}/releases/latest)
 
-      - name: go cache
-        uses: actions/cache@v1
+          export LND_RELEASE_TAG=$(jq -r ".tag_name" <<< "${LND_RELEASE}")
+          export LND_RELEASE_BODY=$(jq -r ".body" <<< "${LND_RELEASE}")
+          export S_LND_RELEASE_TAG=$(jq -r ".tag_name" <<< "${S_LND_RELEASE}")
+
+
+          echo "LND_LATEST=${LND_RELEASE_TAG}" >> $GITHUB_ENV
+          echo "LND_RELEASE_BODY=${LND_RELEASE_BODY}" >> $GITHUB_ENV
+          echo "S_LND_LATEST=${S_LND_RELEASE_TAG}" >> $GITHUB_ENV
+      
+      - name: Checkout to the latest release Git tag
+        if: ${{ env.LND_LATEST != env.S_LND_LATEST }}
+        run: |
+          git checkout ${{ env.LND_RELEASE_TAG }}
+      
+      - name: Push latest release tag to Shocknet fork
+        if: ${{ env.LND_LATEST != env.S_LND_LATEST }}
+        run: |
+          git config user.name github-actions
+          git config user.email github-actions@github.com
+          git remote set-url origin https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}
+          git push -u origin ${{ env.LND_RELEASE_TAG }}
+
+      - name: Build the latest version with experimental flag
+        if: ${{ env.LND_LATEST != env.S_LND_LATEST }}
+        run: |
+          make release tags="experimental autopilotrpc signrpc walletrpc chainrpc invoicesrpc routerrpc" sys="windows-amd64 windows-arm linux-arm64 linux-amd64 linux-armv6 linux-armv7 darwin-amd64 darwin-386"
+      
+      - name: Check for modified files
+        id: git-check
+        run: echo ::set-output name=modified::$([ -z "`git status --porcelain`" ] && echo "false" || echo "true")
+
+      - name: Release the experimental version
+        uses: softprops/action-gh-release@v1
+        if: steps.git-check.outputs.modified == 'true'
         with:
-          path: /home/runner/work/go
-          key: lnd-${{ runner.os }}-go-${{ env.GO_VERSION }}-${{ github.job }}-${{ hashFiles('**/go.sum') }}
-          restore-keys: |
-            lnd-${{ runner.os }}-go-${{ env.GO_VERSION }}-${{ github.job }}-${{ hashFiles('**/go.sum') }}
-            lnd-${{ runner.os }}-go-${{ env.GO_VERSION }}-${{ github.job }}-
-            lnd-${{ runner.os }}-go-${{ env.GO_VERSION }}-
-            lnd-${{ runner.os }}-go-
-
-      - name: setup go ${{ env.GO_VERSION }}
-        uses: actions/setup-go@v2
-        with:
-          go-version: '${{ env.GO_VERSION }}'
-
-      - name: Set env
-        run: echo "RELEASE_VERSION=${GITHUB_REF#refs/*/}" >> $GITHUB_ENV
-
-      - name: build release for all architectures
-        run: SKIP_VERSION_CHECK=1 make release tag=${{ env.RELEASE_VERSION }}
-
-      - name: Create Release
-        uses: lightninglabs/gh-actions/action-gh-release@2021.01.25.00
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          tag_name: ${{ env.RELEASE_VERSION }}
-          name: lnd ${{ env.RELEASE_VERSION }}
-          draft: true
-          prerelease: false
-          files: lnd-${{ env.RELEASE_VERSION }}/*
-          body: |
-            # Database Migrations
-            TODO
-
-            # Verifying the Release
-
-            In order to verify the release, you'll need to have `gpg` or `gpg2` installed on your system. Once you've obtained a copy (and hopefully verified that as well), you'll first need to import the keys that have signed this release if you haven't done so already: 
-
-            ```
-            curl https://keybase.io/bitconner/pgp_keys.asc | gpg --import
-            curl https://keybase.io/roasbeef/pgp_keys.asc | gpg --import
-            ```
-
-            Once you have the required PGP keys, you can verify the release (assuming `manifest-roasbeef-${{ env.RELEASE_VERSION }}.sig` and `manifest-${{ env.RELEASE_VERSION }}.txt` are in the current directory) with:
-
-            ```
-            gpg --verify manifest-roasbeef-${{ env.RELEASE_VERSION }}.sig manifest-${{ env.RELEASE_VERSION }}.txt
-            ```
-
-            You should see the following if the verification was successful:
-
-            ```
-            gpg: Signature made Wed Sep 30 17:35:20 2020 PDT
-            gpg:                using RSA key 4AB7F8DA6FAEBB3B70B1F903BC13F65E2DC84465
-            gpg: Good signature from "Olaoluwa Osuntokun <laolu32@gmail.com>" [ultimate]
-            ```
-
-            That will verify the signature of the manifest file, which ensures integrity and authenticity of the archive you've downloaded locally containing the binaries. Next, depending on your operating system, you should then re-compute the `sha256` hash of the archive with `shasum -a 256 <filename>`, compare it with the corresponding one in the manifest file, and ensure they match *exactly*.
-
-            ## Verifying the Release Timestamp 
-
-            From this new version onwards, in addition time-stamping the _git tag_ with [OpenTimeStamps](https://opentimestamps.org/), we'll also now timestamp the manifest file along with its signature. Two new files are now included along with the rest of our release artifacts: ` manifest-roasbeef-${{ env.RELEASE_VERSION }}.txt.asc.ots`.
-
-            Assuming you have the opentimestamps client installed locally, the timestamps can be verified with the following commands: 
-            ```
-            ots verify manifest-roasbeef-${{ env.RELEASE_VERSION }}.sig.ots -f manifest-roasbeef-${{ env.RELEASE_VERSION }}.sig
-            ```
-
-            Alternatively, [the open timestamps website](https://opentimestamps.org/) can be used to verify timestamps if one doesn't have a `bitcoind` instance accessible locally. 
-
-            These timestamps should give users confidence in the integrity of this release even after the key that signed the release expires. 
-
-            ## Verifying the Release Binaries
-
-            Our release binaries are fully reproducible. Third parties are able to verify that the release binaries were produced properly without having to trust the release manager(s). See our [reproducible builds guide](https://github.com/lightningnetwork/lnd/tree/master/build/release) for how this can be achieved.
-            The release binaries are compiled with `go${{ env.GO_VERSION }}`, which is required by verifiers to arrive at the same ones.
-            They include the following build tags: `autopilotrpc`, `signrpc`, `walletrpc`, `chainrpc`, `invoicesrpc`, `routerrpc`, and `watchtowerrpc`. Note that these are already included in the release script, so they do not need to be provided.
-
-            The `make release` command can be used to ensure one rebuilds with all the same flags used for the release. If one wishes to build for only a single platform, then `make release sys=<OS-ARCH> tag=<tag>` can be used. 
-
-            Finally, you can also verify the _tag_ itself with the following command:
-
-            ```
-            $ git verify-tag ${{ env.RELEASE_VERSION }}
-            gpg: Signature made Tue Sep 15 18:55:00 2020 PDT
-            gpg:                using RSA key 4AB7F8DA6FAEBB3B70B1F903BC13F65E2DC84465
-            gpg: Good signature from "Olaoluwa Osuntokun <laolu32@gmail.com>" [ultimate]
-            ```
-
-            ## Verifying the Docker Images
-
-            To verify the `lnd` and `lncli` binaries inside the docker images against the signed, reproducible release binaries, there is a verification script in the image that can be called (before starting the container for example):
-
-            ```shell
-            $ docker pull lightninglabs/lnd:${{ env.RELEASE_VERSION }}
-            $ docker run --rm --entrypoint="" lightninglabs/lnd:${{ env.RELEASE_VERSION }} /verify-install.sh
-            $ OK=$?
-            $ if [ "$OK" -ne "0" ]; then echo "Verification failed!"; exit 1; done
-            $ docker run lightninglabs/lnd [command-line options]
-            ```
-
-            # Building the Contained Release 
-
-            Users are able to rebuild the target release themselves without having to fetch any of the dependencies. In order to do so, assuming
-            that `vendor.tar.gz` and `lnd-source-${{ env.RELEASE_VERSION }}.tar.gz` are in the current directory, follow these steps:
-
-            ```
-            tar -xvzf vendor.tar.gz
-            tar -xvzf lnd-source-${{ env.RELEASE_VERSION }}.tar.gz
-            GO111MODULE=on go install -v -mod=vendor -ldflags "-X github.com/lightningnetwork/lnd/build.Commit=${{ env.RELEASE_VERSION }}" ./cmd/lnd
-            GO111MODULE=on go install -v -mod=vendor -ldflags "-X github.com/lightningnetwork/lnd/build.Commit=${{ env.RELEASE_VERSION }}" ./cmd/lncli
-            ```
-
-            The `-mod=vendor` flag tells the `go build` command that it doesn't need to fetch the dependencies, and instead, they're all enclosed in the local vendor directory. 
-
-            Additionally, it's now possible to use the [enclosed `release.sh` script to bundle a release for a _specific_ system like so](https://github.com/lightningnetwork/lnd/pull/2191): 
-
-            ```
-            make release sys="linux-arm64 darwin-amd64"
-            ```
-
-            ⚡️⚡️⚡️ OK, now to the rest of the release notes! ⚡️⚡️⚡️
-
-            # Release Notes
-
-            TODO
-
-            # Contributors (Alphabetical Order)
-
-            TODO
+          files: |
+            /lnd-2*/*.tar.gz
+            /lnd-2*/*.zip
+          body: ${{ env.LND_RELEASE_BODY }}
+          draft: false

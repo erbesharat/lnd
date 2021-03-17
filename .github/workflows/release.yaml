@@ -68,3 +68,4 @@ jobs:
             - invoicesrpc 
             - routerrpc
           draft: false
+          tag_name: ${{ env.LND_LATEST }}
